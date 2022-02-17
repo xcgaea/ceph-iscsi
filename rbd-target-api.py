@@ -1851,7 +1851,7 @@ def _update_client(**kwargs):
 
     if client.error:
         logger.error("Invalid client request - {}".format(client.error_msg))
-        return 400, "Invalid client request"
+        return 400, "Invalid client request - {}".format(client.error_msg)
 
     client.manage('present', committer=kwargs['committing_host'])
     if client.error:
