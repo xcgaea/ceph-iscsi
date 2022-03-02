@@ -10,6 +10,7 @@ from logging.handlers import RotatingFileHandler
 import ssl
 import operator
 import OpenSSL
+import tempfile
 import threading
 import time
 import inspect
@@ -35,6 +36,7 @@ from ceph_iscsi_config.common import Config
 from ceph_iscsi_config.utils import (normalize_ip_literal, resolve_ip_addresses,
                                      ip_addresses, read_os_release, encryption_available,
                                      CephiSCSIError, this_host)
+from ceph_iscsi_config.device_status import DeviceStatusWatcher
 
 from gwcli.utils import (APIRequest, valid_gateway, valid_client,
                          valid_credentials, get_remote_gateways, valid_snapshot_name,
@@ -120,7 +122,7 @@ def get_api_info():
     Display all the available API endpoints
     **UNRESTRICTED**
     Examples:
-    curl --insecure --user admin:admin -X GET http://192.168.122.69:5000/api
+    curl --user admin:admin -X GET http://192.168.122.69:5000/api
     """
 
     links = []
@@ -168,7 +170,7 @@ def get_sys_info(query_type=None):
     Valid query types are: ip_addresses, checkconf and checkversions
     **RESTRICTED**
     Examples:
-    curl --insecure --user admin:admin -X GET http://192.168.122.69:5000/api/sysinfo/ip_addresses
+    curl --user admin:admin -X GET http://192.168.122.69:5000/api/sysinfo/ip_addresses
     """
 
     if query_type == 'ip_addresses':
@@ -227,7 +229,7 @@ def get_targets():
     List targets defined in the configuration.
     **RESTRICTED**
     Examples:
-    curl --insecure --user admin:admin -X GET https://192.168.122.69:5000/api/targets
+    curl --user admin:admin -X GET http://192.168.122.69:5000/api/targets
     """
 
     return jsonify({'targets': list(config.config['targets'].keys())}), 200
@@ -245,9 +247,9 @@ def target(target_iqn=None):
     :param controls: (JSON dict) valid control overrides
     **RESTRICTED**
     Examples:
-    curl --insecure --user admin:admin
+    curl --user admin:admin
         -X PUT http://192.168.122.69:5000/api/target/iqn.2003-01.com.redhat.iscsi-gw0
-    curl --insecure --user admin:admin -d mode=reconfigure -d controls='{cmdsn_depth=128}'
+    curl --user admin:admin -d mode=reconfigure -d controls='{cmdsn_depth=128}'
         -X PUT http://192.168.122.69:5000/api/target/iqn.2003-01.com.redhat.iscsi-gw0
     """
 
@@ -497,7 +499,7 @@ def get_config():
     :param decrypt_passwords: (bool) if true, passwords will be decrypted
     **RESTRICTED**
     Examples:
-    curl --insecure --user admin:admin -X GET http://192.168.122.69:5000/api/config
+    curl --user admin:admin -X GET http://192.168.122.69:5000/api/config
     """
 
     if request.method == 'GET':
@@ -546,8 +548,8 @@ def gateways(target_iqn=None):
     Return the gateway subsection of the config object to the caller
     **RESTRICTED**
     Examples:
-    curl --insecure --user admin:admin -X GET
-        http://192.168.122.69:5000/api/gateways/iqn.2003-01.com.redhat.iscsi-gw:iscsi-igw
+    curl --user admin:admin -X GET
+        http://192.168.122.69:5000/api/gateways/iqn.2003-01.com.redhat.iscsi-gw
     """
 
     try:
@@ -579,8 +581,10 @@ def gateway(target_iqn=None, gateway_name=None):
     :param force: (bool) if True will force removal of gateway.
     **RESTRICTED**
     Examples:
-    curl --insecure --user admin:admin -d ip_address=192.168.122.69
-        -X PUT http://192.168.122.69:5000/api/gateway/iscsi-gw0
+    curl --user admin:admin -d ip_address=192.168.122.69
+        -X PUT http://192.168.122.69:5000/api/gateway/iqn.2003-01.com.redhat.iscsi-gw/gateway1
+    curl --user admin:admin
+        -X DELETE http://192.168.122.69:5000/api/gateway/iqn.2003-01.com.redhat.iscsi-gw/gateway1
     """
 
     # the definition of a gateway into an existing configuration can apply the
@@ -748,8 +752,10 @@ def target_disk(target_iqn=None):
     :param disk: (str) rbd image name on the format pool/image
     **RESTRICTED**
     Examples:
-    curl --insecure --user admin:admin -d disk=rbd.new2_1
-        -X PUT https://192.168.122.69:5000/api/targetlun/iqn.2003-01.com.redhat.iscsi-gw:iscsi-igw
+    curl --user admin:admin -d disk=rbd/new2_1
+        -X PUT http://192.168.122.69:5000/api/targetlun/iqn.2003-01.com.redhat.iscsi-gw
+    curl --user admin:admin -d disk=rbd/new2_1
+        -X DELETE http://192.168.122.69:5000/api/targetlun/iqn.2003-01.com.redhat.iscsi-gw
     """
 
     try:
@@ -950,7 +956,7 @@ def get_disks():
     :param config: (str) 'yes' to list the config info of all disks, default is 'no'
     **RESTRICTED**
     Examples:
-    curl --insecure --user admin:admin -d config=yes -X GET https://192.168.122.69:5000/api/disks
+    curl --user admin:admin -d config=yes -X GET http://192.168.122.69:5000/api/disks
     """
 
     conf = request.form.get('config', 'no')
@@ -983,18 +989,18 @@ def disk(pool, image):
     :param count: (str) the number of images will be created
     :param owner: (str) the owner of the rbd image
     :param controls: (JSON dict) valid control overrides
-    :param preserve_image: (bool) do NOT delete RBD image
-    :param create_image: (bool) create RBD image if not exists
+    :param preserve_image: (bool, 'true/false') do NOT delete RBD image
+    :param create_image: (bool, 'true/false') create RBD image if not exists, true as default
     :param backstore: (str) lio backstore
     :param wwn: (str) unit serial number
     **RESTRICTED**
     Examples:
-    curl --insecure --user admin:admin -d mode=create -d size=1g -d pool=rbd -d count=5
-        -X PUT https://192.168.122.69:5000/api/disk/rbd.new2_
-    curl --insecure --user admin:admin -d mode=create -d size=10g -d pool=rbd
-        -X PUT https://192.168.122.69:5000/api/disk/rbd.new3_
-    curl --insecure --user admin:admin -X GET https://192.168.122.69:5000/api/disk/rbd.new2_1
-    curl --insecure --user admin:admin -X DELETE https://192.168.122.69:5000/api/disk/rbd.new2_1
+    curl --user admin:admin -d mode=create -d size=1g -d pool=rbd -d count=5
+        -X PUT http://192.168.122.69:5000/api/disk/rbd/new0_
+    curl --user admin:admin -d mode=create -d size=10g -d pool=rbd -d create_image=false
+        -X PUT http://192.168.122.69:5000/api/disk/rbd/new1
+    curl --user admin:admin -X GET http://192.168.122.69:5000/api/disk/rbd/new2
+    curl --user admin:admin -X DELETE http://192.168.122.69:5000/api/disk/rbd/new3
     """
 
     local_gw = this_host()
@@ -1007,7 +1013,15 @@ def disk(pool, image):
     if request.method == 'GET':
 
         if image_id in config.config['disks']:
-            return jsonify(config.config["disks"][image_id]), 200
+            disk_dict = config.config["disks"][image_id]
+            global dev_status_watcher
+            disk_status = dev_status_watcher.get_dev_status(image_id)
+            if disk_status:
+                disk_dict['status'] = disk_status.get_status_dict()
+            else:
+                disk_dict['status'] = {'state': 'Unknown'}
+
+            return jsonify(disk_dict), 200
 
         else:
             return jsonify(message="rbd image {} not "
@@ -1055,17 +1069,26 @@ def disk(pool, image):
         if disk_usable != 'ok':
             return jsonify(message=disk_usable), 400
 
-        create_image = request.form.get('create_image') == 'true'
-        if mode == 'create' and (not create_image or not size):
+        create_image = request.form.get('create_image', 'true')
+        if create_image not in ['true', 'false']:
+            logger.error("Invalid 'create_image' value {}".format(create_image))
+            return jsonify(message="Invalid 'create_image' value {}".format(create_image)), 400
+
+        if mode == 'create' and (create_image == 'false' or not size):
             try:
+                # no size implies not intention to create an image, try to
+                # check whether it exists
                 rbd_image = RBDDev(image, 0, backstore, pool)
                 size = rbd_image.current_size
             except rbd.ImageNotFound:
-                if not create_image:
-                    return jsonify(message="Image {} does not exist".format(image_id)), 400
-                else:
+                # the create_image=true will be implied if size is specified
+                # by default
+                if create_image == 'true':
+                    # the size must be specified when creating an image
                     return jsonify(message="Size parameter is required when creating a new "
                                            "image"), 400
+                elif create_image == 'false':
+                    return jsonify(message="Image {} does not exist".format(image_id)), 400
 
         if mode == 'reconfigure':
             resp_text, resp_code = lun_reconfigure(image_id, controls, backstore)
@@ -1115,7 +1138,7 @@ def disk(pool, image):
 
         api_vars = {
             'purge_host': local_gw,
-            'preserve_image': request.form['preserve_image'],
+            'preserve_image': request.form.get('preserve_image'),
             'backstore': backstore
         }
 
@@ -1258,7 +1281,7 @@ def _disk(pool, image):
 
         # if valid_request(request.remote_addr):
         purge_host = request.form['purge_host']
-        preserve_image = request.form['preserve_image'] == 'true'
+        preserve_image = request.form.get('preserve_image') == 'true'
         logger.debug("delete request for disk image '{}'".format(image_id))
         pool, image = image_id.split('/', 1)
         disk_config = config.config['disks'][image_id]
@@ -1380,10 +1403,10 @@ def disksnap(pool, image, name):
     :param mode: (str) 'create' or 'rollback' the rbd snapshot
     **RESTRICTED**
     Examples:
-    curl --insecure --user admin:admin -d mode=create
-        -X PUT https://192.168.122.69:5000/api/disksnap/rbd.image/new1
-    curl --insecure --user admin:admin
-        -X DELETE https://192.168.122.69:5000/api/disksnap/rbd.image/new1
+    curl --user admin:admin -d mode=create
+        -X PUT http://192.168.122.69:5000/api/disksnap/rbd.image/new1
+    curl --user admin:admin
+        -X DELETE http://192.168.122.69:5000/api/disksnap/rbd.image/new1
     """
 
     if not valid_snapshot_name(name):
@@ -1534,9 +1557,9 @@ def discoveryauth():
                             [0-9a-zA-Z] and '@' '-' '_' '/'
     **RESTRICTED**
     Example:
-    curl --insecure --user admin:admin -d username=myiscsiusername -d password=myiscsipassword
+    curl --user admin:admin -d username=myiscsiusername -d password=myiscsipassword
         -d mutual_username=myiscsiusername -d mutual_password=myiscsipassword
-        -X PUT https://192.168.122.69:5000/api/discoveryauth
+        -X PUT http://192.168.122.69:5000/api/discoveryauth
     """
 
     username = request.form.get('username', '')
@@ -1609,8 +1632,8 @@ def targetauth(target_iqn=None):
                             [0-9a-zA-Z] and '@' '-' '_' '/'
     **RESTRICTED**
     Examples:
-    curl --insecure --user admin:admin -d auth='disable_acl'
-        -X PUT https://192.168.122.69:5000/api/targetauth/iqn.2003-01.com.redhat.iscsi-gw:iscsi-igw
+    curl --user admin:admin -d auth='disable_acl'
+        -X PUT http://192.168.122.69:5000/api/targetauth/iqn.2003-01.com.redhat.iscsi-gw:iscsi-igw
     """
 
     action = request.form.get('action')
@@ -1740,7 +1763,7 @@ def targetinfo(target_iqn):
     Returns the total number of active sessions for <target_iqn>
     **RESTRICTED**
     Examples:
-    curl --insecure --user admin:admin -X GET
+    curl --user admin:admin -X GET
         http://192.168.122.69:5000/api/targetinfo/iqn.2003-01.com.redhat.iscsi-gw:iscsi-igw
     """
     if target_iqn not in config.config['targets']:
@@ -1770,7 +1793,7 @@ def _targetinfo(target_iqn):
     Returns the number of active sessions for <target_iqn> on local gateway
     **RESTRICTED**
     Examples:
-    curl --insecure --user admin:admin -X GET
+    curl --user admin:admin -X GET
         http://192.168.122.69:5000/api/_targetinfo/iqn.2003-01.com.redhat.iscsi-gw:iscsi-igw
     """
     if target_iqn not in config.config['targets']:
@@ -1788,7 +1811,7 @@ def gatewayinfo():
     Returns the number of active sessions on local gateway
     **RESTRICTED**
     Examples:
-    curl --insecure --user admin:admin -X GET
+    curl --user admin:admin -X GET
         http://192.168.122.69:5000/api/gatewayinfo
     """
     local_gw = this_host()
@@ -1812,8 +1835,8 @@ def get_clients(target_iqn=None):
     restricted_auth wrapper
     **RESTRICTED**
     Examples:
-    curl --insecure --user admin:admin -X GET
-        https://192.168.122.69:5000/api/clients/iqn.2003-01.com.redhat.iscsi-gw:iscsi-igw
+    curl --user admin:admin -X GET
+        http://192.168.122.69:5000/api/clients/iqn.2003-01.com.redhat.iscsi-gw:iscsi-igw
     """
 
     try:
@@ -1884,9 +1907,9 @@ def clientauth(target_iqn, client_iqn):
                             [0-9a-zA-Z] and '@' '-' '_' '/'
     **RESTRICTED**
     Example:
-    curl --insecure --user admin:admin -d username=myiscsiusername -d password=myiscsipassword
+    curl --user admin:admin -d username=myiscsiusername -d password=myiscsipassword
         -d mutual_username=myiscsiusername -d mutual_password=myiscsipassword
-        -X PUT https://192.168.122.69:5000/api/clientauth/iqn.2017-08.org.ceph:iscsi-gw0
+        -X PUT http://192.168.122.69:5000/api/clientauth/iqn.2017-08.org.ceph:iscsi-gw0
     """
 
     try:
@@ -1984,8 +2007,12 @@ def clientlun(target_iqn, client_iqn):
     :param disk: (str) rbd image name of the format pool/image
     **RESTRICTED**
     Examples:
-    curl --insecure --user admin:admin -d disk=rbd.new2_1
-        -X PUT https://192.168.122.69:5000/api/clientlun/iqn.2017-08.org.ceph:iscsi-gw0
+    TARGET_IQN = iqn.2017-08.org.ceph:iscsi-gw
+    CLIENT_IQN = iqn.1994-05.com.redhat:myhost4
+    curl --user admin:admin -d disk=rbd/new2_1
+        -X PUT http://192.168.122.69:5000/api/clientlun/$TARGET_IQN/$CLIENT_IQN
+    curl --user admin:admin -d disk=rbd/new2_1
+        -X DELETE http://192.168.122.69:5000/api/clientlun/$TARGET_IQN/$CLIENT_IQN
     """
 
     try:
@@ -2105,10 +2132,12 @@ def client(target_iqn, client_iqn):
     :param client_iqn: (str) IQN of the client to create or delete
     **RESTRICTED**
     Examples:
-    curl --insecure --user admin:admin
-        -X PUT https://192.168.122.69:5000/api/client/iqn.1994-05.com.redhat:myhost4
-    curl --insecure --user admin:admin
-        -X DELETE https://192.168.122.69:5000/api/client/iqn.1994-05.com.redhat:myhost4
+    TARGET_IQN = iqn.2017-08.org.ceph:iscsi-gw
+    CLIENT_IQN = iqn.1994-05.com.redhat:myhost4
+    curl --user admin:admin
+        -X PUT http://192.168.122.69:5000/api/client/$TARGET_IQN/$CLIENT_IQN
+    curl --user admin:admin
+        -X DELETE http://192.168.122.69:5000/api/client/$TARGET_IQN/$CLIENT_IQN
     """
 
     method = {"PUT": 'create',
@@ -2251,7 +2280,7 @@ def clientinfo(target_iqn, client_iqn):
     Returns client alias, ip_address and state for each connected portal
     **RESTRICTED**
     Examples:
-    curl --insecure --user admin:admin -X GET
+    curl --user admin:admin -X GET
         http://192.168.122.69:5000/api/clientinfo/
         iqn.2003-01.com.redhat.iscsi-gw:iscsi-igw/iqn.2003-01.com.redhat.iscsi-gw:iscsi-igw-client
     """
@@ -2294,7 +2323,7 @@ def _clientinfo(target_iqn, client_iqn):
     Returns client alias, ip_address and state for local gateway
     **RESTRICTED**
     Examples:
-    curl --insecure --user admin:admin -X GET
+    curl --user admin:admin -X GET
         http://192.168.122.69:5000/api/_clientinfo/
         iqn.2003-01.com.redhat.iscsi-gw:iscsi-igw/iqn.2003-01.com.redhat.iscsi-gw:iscsi-igw-client
     """
@@ -2315,7 +2344,7 @@ def hostgroups(target_iqn=None):
     Return the hostgroup names defined to the configuration
     **RESTRICTED**
     Examples:
-    curl --insecure --user admin:admin -X GET
+    curl --user admin:admin -X GET
         http://192.168.122.69:5000/api/hostgroups/iqn.2003-01.com.redhat.iscsi-gw:iscsi-igw
     """
 
@@ -2342,12 +2371,12 @@ def hostgroup(target_iqn, group_name):
     :param: action (str) 'add'/'remove' group's client members/disks, default is 'add'
     :return:
     Examples:
-    curl --insecure --user admin:admin -X GET http://192.168.122.69:5000/api/hostgroup/group_name
-    curl --insecure --user admin:admin -d members=iqn.1994-05.com.redhat:myhost4
+    curl --user admin:admin -X GET http://192.168.122.69:5000/api/hostgroup/group_name
+    curl --user admin:admin -d members=iqn.1994-05.com.redhat:myhost4
         -d disks=rbd.disk1 -X PUT http://192.168.122.69:5000/api/hostgroup/group_name
-    curl --insecure --user admin:admin -d action=remove -d disks=rbd.disk1
+    curl --user admin:admin -d action=remove -d disks=rbd.disk1
         -X PUT http://192.168.122.69:5000/api/hostgroup/group_name
-    curl --insecure --user admin:admin
+    curl --user admin:admin
         -X DELETE http://192.168.122.69:5000/api/hostgroup/group_name
     """
     http_mode = 'https' if settings.config.api_secure else 'http'
@@ -2480,7 +2509,7 @@ def get_settings():
     List settings.
     **RESTRICTED**
     Examples:
-    curl --insecure --user admin:admin -X GET https://192.168.122.69:5000/api/settings
+    curl --user admin:admin -X GET http://192.168.122.69:5000/api/settings
     """
 
     target_default_controls, target_controls_limits = fill_settings_dict(GWTarget.SETTINGS)
@@ -2800,11 +2829,7 @@ class ConfigWatcher(threading.Thread):
             try:
                 obj_epoch = int(ioctx.get_xattr('gateway.conf', 'epoch'))
             except rados.ObjectNotFound:
-                # daemon is running prior to any config being created or it has
-                # skip the error, and
-                logger.warning("config object missing, recreating")
-                config.refresh()
-
+                raise
             else:
                 # if it's changed, refresh the local config to ensure a query
                 # to this node will return current state
@@ -2815,13 +2840,46 @@ class ConfigWatcher(threading.Thread):
                     config.refresh()
 
 
+def get_ssl_files_from_mon():
+    client_name = settings.config.cluster_client_name
+    temp_files = []
+    crt_data = settings.config.pull_from_mon_config(
+        "iscsi/{}/iscsi-gateway.crt".format(client_name))
+    if not crt_data:
+        return temp_files
+
+    key_data = settings.config.pull_from_mon_config(
+        "iscsi/{}/iscsi-gateway.key".format(client_name))
+    if not key_data:
+        return temp_files
+
+    for data in crt_data, key_data:
+        # NOTE: Annoyingly SSLContext.load_cert_chain can only take
+        # paths to files and not file like objects.. yet. So we need to
+        # create tempfiles for the SSL context to read. Once
+        # https://bugs.python.org/issue16487 is resolved, we should be able
+        # to simply use file-like objects and makes this much nicer.
+
+        tmp_f = tempfile.NamedTemporaryFile(mode='w')
+        tmp_f.write(data)
+        tmp_f.flush()
+        temp_files.append(tmp_f)
+    return temp_files
+
+
 def get_ssl_context():
     # Use these self-signed crt and key files
     cert_files = ['/etc/ceph/iscsi-gateway.crt',
                   '/etc/ceph/iscsi-gateway.key']
+    temp_files = []
 
     if not all([os.path.exists(crt_file) for crt_file in cert_files]):
-        return None
+        # attempt to pull out the crt and key data from global mon config-key
+        # storage, we need to return the tempfiles so they're not gc'ed.
+        temp_files = get_ssl_files_from_mon()
+        cert_files = [f.name for f in temp_files]
+        if not cert_files or not all([os.path.exists(crt_file) for crt_file in cert_files]):
+            return None
 
     ver, rel, mod = werkzeug.__version__.split('.')
     if int(rel) > 9:
@@ -2842,6 +2900,10 @@ def get_ssl_context():
             logger.critical("SSL Error : {}".format(err))
             return None
 
+    # If we have loaded the certs into tempfiles we can clean them up now.
+    # This should happen when we return, but let's be explicit.
+    for f in temp_files:
+        f.close()
     return context
 
 
@@ -2853,12 +2915,17 @@ def main():
     log.setLevel(logging.DEBUG)
 
     # Attach the werkzeug log to the handlers defined in the outer scope
-    log.addHandler(file_handler)
+    if settings.config.log_to_file:
+        log.addHandler(file_handler)
     log.addHandler(syslog_handler)
+
+    global dev_status_watcher
+    dev_status_watcher = DeviceStatusWatcher(logger)
+    dev_status_watcher.start()
 
     ceph_gw = CephiSCSIGateway(logger, config)
 
-    osd_state_ok = ceph_gw.osd_blacklist_cleanup()
+    osd_state_ok = ceph_gw.osd_blocklist_cleanup()
     if not osd_state_ok:
         sys.exit(16)
 
@@ -2923,23 +2990,30 @@ if __name__ == '__main__':
     logger.setLevel(logging.DEBUG)
 
     # syslog (systemctl/journalctl messages)
-    syslog_handler = logging.handlers.SysLogHandler(address='/dev/log')
-    syslog_handler.setLevel(logging.INFO)
     syslog_format = logging.Formatter("%(message)s")
+    if settings.config.log_to_stderr:
+        syslog_handler = logging.StreamHandler(sys.stderr)
+        if settings.config.log_to_stderr_prefix:
+            syslog_format = \
+                logging.Formatter("{} %(message)s".format(
+                    settings.config.log_to_stderr_prefix))
+    else:
+        syslog_handler = logging.handlers.SysLogHandler(address='/dev/log')
+    syslog_handler.setLevel(logging.INFO)
     syslog_handler.setFormatter(syslog_format)
-
-    # file target - more verbose logging for diagnostics
-    file_handler = RotatingFileHandler('/var/log/rbd-target-api/rbd-target-api.log',
-                                       maxBytes=5242880,
-                                       backupCount=7)
-    file_handler.setLevel(logger_level)
-    file_format = logging.Formatter(
-        "%(asctime)s %(levelname)8s [%(filename)s:%(lineno)s:%(funcName)s()] "
-        "- %(message)s")
-    file_handler.setFormatter(file_format)
-
     logger.addHandler(syslog_handler)
-    logger.addHandler(file_handler)
+
+    if settings.config.log_to_file:
+        # file target - more verbose logging for diagnostics
+        file_handler = RotatingFileHandler('/var/log/rbd-target-api/rbd-target-api.log',
+                                           maxBytes=5242880,
+                                           backupCount=7)
+        file_handler.setLevel(logger_level)
+        file_format = logging.Formatter(
+            "%(asctime)s %(levelname)8s [%(filename)s:%(lineno)s:%(funcName)s()] "
+            "- %(message)s")
+        file_handler.setFormatter(file_format)
+        logger.addHandler(file_handler)
 
     # config is set in the outer scope, so it's easily accessible to all
     # api functions

@@ -75,9 +75,11 @@ class Config(object):
 
     lock_time_limit = 30
 
-    def __init__(self, logger, cfg_name='gateway.conf', pool=None):
+    def __init__(self, logger, cfg_name=None, pool=None):
         self.logger = logger
         self.config_name = cfg_name
+        if self.config_name is None:
+            self.config_name = settings.config.gateway_conf
         if pool is None:
             pool = settings.config.pool
         self.pool = pool
@@ -617,7 +619,7 @@ class Config(object):
                     del current_config[txn.type]
             else:
                 self.error = True
-                self.error_msg = "Unknown transaction type ({}} encountered in " \
+                self.error_msg = "Unknown transaction type ({}) encountered in " \
                                  "_commit_rbd".format(txn.action)
 
         if not self.error:

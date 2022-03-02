@@ -113,8 +113,7 @@ def valid_gateway(target_iqn, gw_name, gw_ips, config):
     api.get()
     if api.response.status_code != 200:
         return ("checkconf API call to {} failed with "
-                "code".format(gw_name,
-                              api.response.status_code))
+                "code {}".format(gw_name, api.response.status_code))
 
     # compare the hash of the new gateways conf file with the local one
     local_hash = settings.config.hash()
@@ -441,7 +440,7 @@ class APIRequest(object):
                        "{}".format(self.args[0]))
                 self.data = Response()
                 self.data.status_code = 500
-                self.data._content = '{{"message": "{}" }}'.format(msg)
+                self.data._content = '{{"message": "{}" }}'.format(msg).encode('utf-8')
                 return self._get_response
             except Exception:
                 raise GatewayAPIError("Unknown error connecting to "

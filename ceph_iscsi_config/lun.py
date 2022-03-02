@@ -406,17 +406,17 @@ class LUN(GWObject):
             self.config.update_item("targets", target_iqn, target_config)
 
             # determine which host was the path owner
-            disk_owner = self.config.config['disks'][self.config_key]['owner']
+            disk_owner = self.config.config['disks'][self.config_key].get('owner')
+            if disk_owner:
+                # update the active_luns count for gateway that owned this
+                # lun
+                gw_metadata = self.config.config['gateways'][disk_owner]
+                if gw_metadata['active_luns'] > 0:
+                    gw_metadata['active_luns'] -= 1
 
-            # update the active_luns count for gateway that owned this
-            # lun
-            gw_metadata = self.config.config['gateways'][disk_owner]
-            if gw_metadata['active_luns'] > 0:
-                gw_metadata['active_luns'] -= 1
-
-                self.config.update_item('gateways',
-                                        disk_owner,
-                                        gw_metadata)
+                    self.config.update_item('gateways',
+                                            disk_owner,
+                                            gw_metadata)
 
             disk_metadata = self.config.config['disks'][self.config_key]
             if 'owner' in disk_metadata:
@@ -986,8 +986,8 @@ class LUN(GWObject):
         if mode in mode_vars:
             if not all(x in kwargs for x in mode_vars[mode]):
                 return ("{} request must contain the following "
-                        "variables: ".format(mode,
-                                             ','.join(mode_vars[mode])))
+                        "variables: {}".format(mode,
+                                               ','.join(mode_vars[mode])))
         else:
             return "disk operation mode '{}' is invalid".format(mode)
 

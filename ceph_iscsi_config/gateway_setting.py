@@ -71,7 +71,7 @@ class ListSetting(Setting):
         return str(norm_val)
 
     def normalize(self, raw_val):
-        return raw_val.split(',') if raw_val else []
+        return [r.strip() for r in raw_val.split(',')] if raw_val else []
 
 
 class StrSetting(Setting):
@@ -183,6 +183,7 @@ SYS_SETTINGS = {
     "debug": BoolSetting("debug", False),
     "minimum_gateways": IntSetting("minimum_gateways", 1, 9999, 2),
     "ceph_config_dir": StrSetting("ceph_config_dir", '/etc/ceph'),
+    "gateway_conf": StrSetting("gateway_conf", 'gateway.conf'),
     "priv_key": StrSetting("priv_key", 'iscsi-gateway.key'),
     "pub_key": StrSetting("pub_key", 'iscsi-gateway-pub.key'),
     "prometheus_exporter": BoolSetting("prometheus_exporter", True),
@@ -190,6 +191,9 @@ SYS_SETTINGS = {
     "prometheus_host": StrSetting("prometheus_host", "::"),
     "logger_level": IntSetting("logger_level", logging.DEBUG, logging.CRITICAL,
                                logging.DEBUG),
+    "log_to_stderr": BoolSetting("log_to_stderr", False),
+    "log_to_stderr_prefix": StrSetting("log_to_stderr_prefix", ""),
+    "log_to_file": BoolSetting("log_to_file", True),
     # TODO: This is under sys for compat. It is not settable per device/backend
     # type yet.
     "alua_failover_type": EnumSetting("alua_failover_type",
@@ -200,3 +204,8 @@ TCMU_SETTINGS = {
     "qfull_timeout": IntSetting("qfull_timeout", 0, 600, 5),
     "osd_op_timeout": IntSetting("osd_op_timeout", 0, 600, 30),
     "hw_max_sectors": IntSetting("hw_max_sectors", 1, 8192, 1024)}
+
+TCMU_DEV_STATUS_SETTINGS = {
+    "lock_lost_cnt_threshhold": IntSetting("lock_lost_cnt_threshhold", 1, 1000000, 12),
+    "status_check_interval": IntSetting("status_check_interval", 1, 600, 10),
+    "stable_state_reset_count": IntSetting("stable_state_reset_count", 1, 600, 3)}

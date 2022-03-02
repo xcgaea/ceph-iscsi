@@ -20,7 +20,7 @@
 
 
 Name:           ceph-iscsi
-Version:        3.4
+Version:        3.5
 Release:        1%{?dist}
 Group:          System/Filesystems
 Summary:        Python modules for Ceph iSCSI gateway configuration management
@@ -36,8 +36,10 @@ BuildArch:      noarch
 
 Obsoletes:      ceph-iscsi-config
 Obsoletes:      ceph-iscsi-cli
+Obsoletes:      ceph-iscsi-tools
 
 Requires:       tcmu-runner >= 1.4.0
+Requires:       ceph-common >= 10.2.2
 %if 0%{?with_python2}
 BuildRequires:  python2-devel
 BuildRequires:  python2-setuptools
