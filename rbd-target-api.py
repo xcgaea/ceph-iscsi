@@ -858,7 +858,7 @@ def target_disk(target_iqn=None):
             return jsonify(message="Delete target LUN mapping failed - "
                                    "{}".format(resp_text)), resp_code
 
-    return jsonify(message="Target LUN mapping updated successfully"), 200
+    return jsonify(message="Target LUN mapping updated successfully", result="{}".format(resp_text)), 200
 
 
 @app.route('/api/_targetlun/<target_iqn>', methods=['PUT', 'DELETE'])
@@ -2646,30 +2646,31 @@ def target_ready(gateway_list):
                     "summary": ''}
 
     for gw in gateway_list:
-        api_endpoint = ("{}://{}:{}/api/_ping".format(http_mode,
-                                                      normalize_ip_literal(gw),
-                                                      settings.config.api_port))
-        try:
-            api = APIRequest(api_endpoint)
-            api.get()
-        except GatewayAPIError:
-            target_state['status'] = 'NOTOK'
-            target_state['status_iscsi'] = 'UNKNOWN'
-            target_state['status_api'] = 'DOWN'
-            target_state['summary'] += ',{}(iscsi Unknown, API down)'.format(gw)
-        else:
-            if api.response.status_code == 200:
-                continue
-            elif api.response.status_code == 503:
-                target_state['status'] = 'NOTOK'
-                target_state['status_iscsi'] = 'DOWN'
-                target_state['status_api'] = 'UP'
-                target_state['summary'] += ',{}(iscsi down, API up)'.format(gw)
-            else:
+        if this_host() == normalize_ip_literal(gw):
+            api_endpoint = ("{}://{}:{}/api/_ping".format(http_mode,
+                                                          normalize_ip_literal(gw),
+                                                          settings.config.api_port))
+            try:
+                api = APIRequest(api_endpoint)
+                api.get()
+            except GatewayAPIError:
                 target_state['status'] = 'NOTOK'
                 target_state['status_iscsi'] = 'UNKNOWN'
-                target_state['status_api'] = 'UNKNOWN'
-                target_state['summary'] += ',{}(UNKNOWN state)'.format(gw)
+                target_state['status_api'] = 'DOWN'
+                target_state['summary'] += ',{}(iscsi Unknown, API down)'.format(gw)
+            else:
+                if api.response.status_code == 200:
+                    continue
+                elif api.response.status_code == 503:
+                    target_state['status'] = 'NOTOK'
+                    target_state['status_iscsi'] = 'DOWN'
+                    target_state['status_api'] = 'UP'
+                    target_state['summary'] += ',{}(iscsi down, API up)'.format(gw)
+                else:
+                    target_state['status'] = 'NOTOK'
+                    target_state['status_iscsi'] = 'UNKNOWN'
+                    target_state['status_api'] = 'UNKNOWN'
+                    target_state['summary'] += ',{}(UNKNOWN state)'.format(gw)
 
     target_state['summary'] = target_state['summary'][1:]   # ignore 1st char
 
@@ -2742,8 +2743,10 @@ def call_api(gateway_list, endpoint, element, http_method='put', api_vars=None):
                 fail_msg += "unknown failure"
 
             logger.debug(fail_msg)
-
-            return fail_msg, api.response.status_code
+            if len(updated) > 0:
+                return fail_msg, 200
+            else:
+                return fail_msg, api.response.status_code
 
     return api.response.text if http_method == 'get' else 'successful', 200
 
