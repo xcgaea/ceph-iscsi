@@ -2765,6 +2765,8 @@ def pre_reqs_errors():
         "ubuntu": 18.04}
 
     errors_found = []
+    #### check system is true
+    return errors_found
 
     os_release = read_os_release()
     dist = os_release.get('ID', '')
