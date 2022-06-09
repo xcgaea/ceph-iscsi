@@ -157,6 +157,6 @@ class DeviceStatusWatcher(threading.Thread):
                         dev_status.changed_state = False
 
             # debugging info
-            dev_status = self.get_dev_status(image_name)
-            stats_dict = dev_status.get_status_dict()
-            self.logger.debug(stats_dict)
+            #dev_status = self.get_dev_status(image_name)
+            #stats_dict = dev_status.get_status_dict()
+            #self.logger.debug(stats_dict)
