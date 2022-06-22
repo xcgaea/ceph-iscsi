@@ -1004,8 +1004,8 @@ class LUN(GWObject):
             if kwargs['size'] and not valid_size(kwargs['size']):
                 return "Size is invalid"
 
-            if len(config['disks']) >= 256:
-                return "Disk limit of 256 reached."
+            #if len(config['disks']) >= 256:
+            #    return "Disk limit of 256 reached."
 
             disk_regex = re.compile(r"^[a-zA-Z0-9\-_\.]+$")
             if not disk_regex.search(kwargs['pool']):
